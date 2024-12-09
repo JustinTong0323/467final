@@ -132,3 +132,7 @@ cython_debug/
 .DS_Store
 
 data/
+checkpoints/
+*.pt
+*.csv
+*.npy
