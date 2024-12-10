@@ -134,5 +134,7 @@ cython_debug/
 data/
 checkpoints/
 *.pt
-*.csv
 *.npy
+*.csv
+
+!best_model.pt

@@ -9,10 +9,12 @@ from transformers import (
 import librosa
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
 from tqdm import tqdm
 import os
 import argparse
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 class SpeechEmotionRecognition:
     def __init__(self, df, model_name='facebook/wav2vec2-base', batch_size=2, lr=1e-5, num_epochs=5, checkpoint_dir='checkpoints', gradient_accumulation_steps=4, checkpoint_path=None):  # Reduced batch size to mitigate memory issues
@@ -226,7 +228,14 @@ class SpeechEmotionRecognition:
 
     def evaluate_test_set(self, test_df):
         test_dataset = self.SpeechEmotionDataset(test_df, self.target_sampling_rate)
-        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False, collate_fn=self.speech_collate_fn, num_workers=4, pin_memory=True)
+        test_loader = DataLoader(
+            test_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=False, 
+            collate_fn=self.speech_collate_fn, 
+            num_workers=4, 
+            pin_memory=True
+        )
 
         self.model.eval()
         all_preds = []
@@ -251,39 +260,28 @@ class SpeechEmotionRecognition:
         f1 = f1_score(all_labels, all_preds, average='weighted')
         print(f"Test Accuracy: {accuracy:.4f}, Test F1 Score: {f1:.4f}")
 
+        # Plot confusion matrix
+        cm = confusion_matrix(all_labels, all_preds)
+        emotion_list = ['angry', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised', 'calm']
+        num_labels = sorted(test_df['label'].unique())
+        labels = [emotion_list[i] for i in num_labels]
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=labels, yticklabels=labels, cmap='Blues')
+        plt.xlabel('Predicted Labels')
+        plt.ylabel('True Labels')
+        plt.title('Confusion Matrix')
+        plt.savefig('confusion_matrix.png')
+        plt.close()
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_csv', type=str, required=True, help='Path to the CSV file containing file paths and labels')
-    parser.add_argument('--epochs', type=int, default=5, help='Number of epochs for training')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
-    parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate')
-    parser.add_argument('--checkpoint', type=str, default=None, help='Path to model checkpoint to continue training')
-    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints', help='Directory to save model checkpoints')
-    parser.add_argument('--gradient_accumulation_steps', type=int, default=4, help='Number of gradient accumulation steps')
-    parser.add_argument('--test_csv', type=str, default=None, help='Path to the CSV file containing test data for evaluation')
-    args = parser.parse_args()
+        # Print classification report
+        report = classification_report(all_labels, all_preds, target_names=labels)
+        print("Classification Report:\n", report)
 
-    # Load data
-    df = pd.read_csv(args.data_csv)
-
-    # Initialize and train model
-    ser = SpeechEmotionRecognition(
-        df=df,
-        model_name='facebook/wav2vec2-base',
-        batch_size=args.batch_size,
-        lr=args.lr,
-        num_epochs=args.epochs,
-        checkpoint_dir=args.checkpoint_dir,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        checkpoint_path=args.checkpoint
-    )
-    ser.train()
-
-    # Evaluate on test set if provided
-    if args.test_csv:
-        test_df = pd.read_csv(args.test_csv)
-        ser.evaluate_test_set(test_df)
-
-if __name__ == "__main__":
-    main()
+        # Save misclassified samples
+        test_df = test_df.reset_index(drop=True)
+        test_df['preds'] = all_preds
+        test_df['correct'] = test_df['label'] == test_df['preds']
+        misclassified = test_df[test_df['correct'] == False]
+        misclassified.to_csv('misclassified_samples.csv', index=False)
+        print(f"Number of misclassified samples: {len(misclassified)}")
+        print("Misclassified samples saved to 'misclassified_samples.csv'")
